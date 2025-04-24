@@ -31,14 +31,15 @@ const registerUser = async (req, res, next) => {
     }
 
     // Hash the password
-    const hashedPassword = await bcrypt.hash(password, 10);
+    // const hashedPassword = await bcrypt.hash(password, 10);
 
     // Create user
     const user = await User.create({
       firstName,
       lastName,
       emailId,
-      password: hashedPassword,
+      // password: hashedPassword,
+      password,
       age,
       gender,
       photoUrl,
@@ -76,13 +77,16 @@ const loginUser = async (req, res, next) => {
   try {
     const { emailId, password } = req.body;
 
-    // 1. Check if email and password are entered
+    // 1. Validate required fields
     if (!emailId || !password) {
       return next(new ErrorHandler("Please enter email and password", 400));
     }
 
     // 2. Find user by email
-    const user = await User.findOne({ emailId });
+    // const user = await User.findOne({ emailId });
+
+    // 2. Find user by email and include password
+    const user = await User.findOne({ emailId }).select("+password");
     if (!user) {
       return next(new ErrorHandler("Invalid email or password", 401));
     }
@@ -92,9 +96,22 @@ const loginUser = async (req, res, next) => {
     if (!isPasswordMatched) {
       return next(new ErrorHandler("Invalid email or password", 401));
     }
+    // console.log("Entered password:", password);
+    // console.log("Hashed password in DB:", user.password);
 
     // 4. Generate JWT token
     const token = await user.getJWT();
+
+    // 5. Define secure cookie options
+    // const cookieOptions = {
+    //   expires: new Date(Date.now() + 8 * 3600000), // 8 hours
+    //   httpOnly: true, // Not accessible via client-side JS
+    //   sameSite: "lax", // CSRF protection
+    //   secure: process.env.NODE_ENV === "production", // Send only over HTTPS in production
+    // };
+
+    // 6. Set JWT token in cookie
+    // res.cookie("token", token, cookieOptions);
 
     // 5. Set token in cookie
     res.cookie("token", token, {
@@ -130,7 +147,21 @@ const logout = async (req, res, next) => {
       httpOnly: true, // Secure: cookie can’t be accessed by JS
       sameSite: "lax", // Helps with CSRF protection
       secure: process.env.NODE_ENV === "production", // Use HTTPS in production
+
+      // expires: new Date(0), // Ensures cookie is considered expired by all clients
+      // httpOnly: true,       // Prevents client-side JavaScript from accessing the cookie
+      // secure: process.env.NODE_ENV === "production", // Sends cookie over HTTPS only in production
+      // sameSite: "strict",   // Strong CSRF protection
+      // path: "/",            // Ensure cookie is removed for all routes
     });
+
+    // Also clear cookie explicitly using res.clearCookie for added reliability
+    //  res.clearCookie("token", {
+    //   httpOnly: true,
+    //   secure: process.env.NODE_ENV === "production",
+    //   sameSite: "strict",
+    //   path: "/",
+    // });
 
     res.status(200).json({
       success: true,
@@ -274,6 +305,231 @@ const getUserProfile = async (req, res) => {
   }
 };
 
+const updatePassword = async (req, res, next) => {
+  try {
+    const { oldpassword, newpassword, confirmpassword } = req.body;
+
+    // 1. Validate inputs
+    if (!oldpassword || !newpassword || !confirmpassword) {
+      return next(new ErrorHandler("All fields are required", 400));
+    }
+
+    // 2. Find the user (must be authenticated)
+    const user = await User.findById(req.user.id).select("+password");
+    if (!user) {
+      return next(new ErrorHandler("User not found", 404));
+    }
+
+    // 3. Check if old password matches
+    const isMatch = await bcrypt.compare(oldpassword, user.password);
+    if (!isMatch) {
+      return next(new ErrorHandler("Old password is incorrect", 400));
+    }
+
+    // 4. Match new password and confirm password
+    if (newpassword !== confirmpassword) {
+      return next(
+        new ErrorHandler("New password and confirm password do not match", 400)
+      );
+    }
+
+    // 5. Update and hash the new password (hashing is handled in pre-save hook)
+    user.password = newpassword;
+    console.log("New password before save:", user.password);
+    await user.save();
+    console.log("New password after save:", user.password);
+
+    // 6. Generate a new JWT token
+    const token = await user.getJWT();
+
+    // 7. Set token in cookie
+    res.cookie("token", token, {
+      expires: new Date(Date.now() + 8 * 3600000), // 8 hours
+      httpOnly: true,
+    });
+
+    // 8. Return success with token and user info
+    res.status(200).json({
+      success: true,
+      message: "Password updated and user logged in successfully",
+      token,
+      user: {
+        id: user._id,
+        firstName: user.firstName,
+        emailId: user.emailId,
+        role: user.role,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const updateProfileData = async (req, res, next) => {
+  try {
+    const { firstName, lastName, emailId } = req.body;
+
+    // 1. Validate presence of at least one field
+    if (!firstName && !lastName && !emailId) {
+      return next(new ErrorHandler("No data provided to update", 400));
+    }
+
+    // const updateUserDetails = {
+    //   firstName,
+    //   lastName,
+    //   emailId,
+    // };
+    // const user = await User.findByIdAndUpdate(req.user.id, updateUserDetails, {
+    //   new: true,
+    //   runValidators: true,
+    // });
+
+    // 2. Prepare updated fields
+    const updateUserDetails = {};
+    if (firstName) updateUserDetails.firstName = firstName;
+    if (lastName) updateUserDetails.lastName = lastName;
+    if (emailId) updateUserDetails.emailId = emailId;
+
+    // 3. Update user with validation
+    const user = await User.findByIdAndUpdate(req.user.id, updateUserDetails, {
+      new: true,
+      runValidators: true,
+    });
+
+    if (!user) {
+      return next(new ErrorHandler("User not found", 404));
+    }
+
+    // 4. Send response
+    res.status(200).json({
+      success: true,
+      message: "Profile updated successfully",
+      user: {
+        id: user._id,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        emailId: user.emailId,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// TODO  ADMIN
+
+// admin getting all the user
+const getUserList = async (req, res, next) => {
+  try {
+    const userlist = await User.find();
+    res.status(200).json({
+      success: true,
+      userlist,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+// admin get single user data
+const getsingleuserwithID = async (req, res, next) => {
+  try {
+    const userId = req.params.id;
+
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        // message: "User not found",
+        message: `User not found with ID: ${userId}`,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      user,
+    });
+  } catch (error) {
+    console.error("Error fetching user:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch user",
+    });
+  }
+};
+
+// admin can change the role only
+const updateUserRole = async (req, res, next) => {
+  try {
+    const { role } = req.body;
+
+    const newUserRoleData = {
+      role,
+    };
+
+    // const user = await User.findByIdAndUpdate(req.user.id, newUserRoleData, {
+    //   new: true,
+    //   runValidators: true,
+    // });
+    const user = await User.findByIdAndUpdate(req.params.id, newUserRoleData, {
+      new: true,
+      runValidators: true,
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: `User not found with ID: ${req.user.id}`,
+      });
+    }
+    // Update the role
+    // user.role = role;
+    // await user.save(); // Save the updated user to the database
+
+    res.status(200).json({
+      success: true,
+      message: "User role updated successfully",
+      user,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Error updating user role",
+    });
+  }
+};
+
+//admin can delete the user
+const deleteUser = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.params.id);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: `User not found with ID: ${req.params.id}`,
+      });
+    }
+
+    await user.deleteOne();
+
+    res.status(200).json({
+      success: true,
+      message: "User deleted successfully",
+    });
+  } catch (error) {
+    console.error("Error deleting user:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error deleting user",
+    });
+  }
+};
+
 module.exports = {
   registerUser,
   loginUser,
@@ -281,4 +537,12 @@ module.exports = {
   forgotPassword,
   resetPassword,
   getUserProfile,
+  updatePassword,
+  updateProfileData,
+
+  // admin
+  getUserList,
+  getsingleuserwithID,
+  updateUserRole,
+  deleteUser,
 };

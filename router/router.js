@@ -6,13 +6,20 @@ const {
   getProductById,
   updateProduct,
   deleteProduct,
+  getAdminAllProducts,
+  reviewforproduct,
 } = require("../controllers/productlogic");
 const { userAuth, authorizeRoles } = require("../middleware/auth");
 
-router.post("/product", userAuth, authorizeRoles("admin"), createProduct);
-router.get("/products", userAuth, getAllProducts);
-router.put("/product/:id", authorizeRoles("admin"), updateProduct);
-router.delete("/product/:id", authorizeRoles("admin"), deleteProduct);
+router.get("/products", getAllProducts);
+
+router.get("/admin/products",userAuth,authorizeRoles("admin"),getAdminAllProducts)
+router.post("/admin/product", userAuth, authorizeRoles("admin"), createProduct);
+router.put("/admin/product/:id", userAuth, authorizeRoles("admin"), updateProduct);
+router.delete("/admin/product/:id", userAuth, authorizeRoles("admin"), deleteProduct);
+
 router.get("/product/:id", getProductById);
+
+router.put("/product/review",userAuth, reviewforproduct);
 
 module.exports = router;

@@ -2,6 +2,8 @@ const mongoose = require("mongoose");
 const validator = require("validator");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
+const bcrypt = require("bcryptjs");
+
 const userSchema = new mongoose.Schema(
   {
     // Personal Info
@@ -34,6 +36,7 @@ const userSchema = new mongoose.Schema(
     password: {
       type: String,
       required: [true, "Password is required"],
+      select: false,
       validate: {
         validator: (value) => validator.isStrongPassword(value),
         message: (props) => `Enter a strong password: ${props.value}`,
@@ -56,7 +59,7 @@ const userSchema = new mongoose.Schema(
 
     photoUrl: {
       type: String,
-      default: "https://geographyandyou.com/images/user-profile.png",
+    
       validate: {
         validator: (value) => validator.isURL(value),
         message: (props) => `Invalid photo URL: ${props.value}`,
@@ -69,49 +72,40 @@ const userSchema = new mongoose.Schema(
       trim: true,
     },
 
-    // Role Field
     role: {
       type: String,
       enum: ["user", "admin", "trainer"],
       default: "user",
     },
 
-    // Reset Password Support
     resetPasswordToken: String,
     resetPasswordExpire: Date,
   },
   {
-    timestamps: true, // automatically adds createdAt & updatedAt
+    timestamps: true,
   }
 );
 
+// ✅ FIXED: Enable password hashing before save
+userSchema.pre("save", async function (next) {
+  if (!this.isModified("password")) return next();
+  this.password = await bcrypt.hash(this.password, 10);
+  next();
+});
+
 userSchema.methods.getJWT = function () {
-  return jwt.sign(
-    { _id: this._id },
-    process.env.JWT_SECRET, // 🔐 From .env
-    {
-      expiresIn: process.env.JWT_EXPIRE || "7d", // optional
-    }
-  );
+  return jwt.sign({ _id: this._id }, process.env.JWT_SECRET, {
+    expiresIn: process.env.JWT_EXPIRE || "7d",
+  });
 };
 
 userSchema.methods.generatePasswordResetToken = function () {
-  // Generate a random reset token
   const resetToken = crypto.randomBytes(20).toString("hex");
-
-  // Hash and set to resetPasswordToken field in the user document
   this.resetPasswordToken = crypto
     .createHash("sha256")
     .update(resetToken)
     .digest("hex");
-
-  // Set token expiry time (e.g., 15 minutes from now)
   this.resetPasswordExpire = Date.now() + 15 * 60 * 1000;
-
-  // Set token expiry time (e.g., 30 minutes from now)
-  // this.resetPasswordExpire = Date.now() + 30 * 60 * 1000;
-
-  // Return the plain reset token (send this in email to user)
   return resetToken;
 };
 

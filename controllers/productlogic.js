@@ -131,6 +131,7 @@
 //   getProductById,
 // };
 const Product = require("../models/productSchema");
+const User = require("../models/userSchema");
 const ApiFeatures = require("../utils/apiFeatures");
 const ErrorHandler = require("../utils/ErrorHandler");
 
@@ -362,10 +363,88 @@ const deleteProduct = async (req, res, next) => {
   }
 };
 
+const reviewforproduct = async (req, res, next) => {
+  try {
+    const { rating, comment, productId } = req.body;
+    const userId = req.user.id;
+    console.log(req.user);
+    // const userName = req.user.name;
+    const userName = `${req.user.firstName} ${req.user.lastName}`;
+
+    const product = await Product.findById(productId);
+
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: `Product not found with ID: ${productId}`,
+      });
+    }
+
+    const review = {
+      user: userId,
+      name: userName,
+      rating: Number(rating),
+      comment,
+    };
+
+    const alreadyReviewed = product.reviews.find(
+      (rev) => rev.user.toString() === userId
+    );
+
+    if (alreadyReviewed) {
+      alreadyReviewed.rating = review.rating;
+      alreadyReviewed.comment = review.comment;
+    } else {
+      product.reviews.push(review);
+    }
+
+    product.numOfReviews = product.reviews.length;
+    product.ratings =
+      product.reviews.reduce((acc, item) => acc + item.rating, 0) /
+      product.reviews.length;
+
+    await product.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Review added/updated successfully",
+      product,
+    });
+  } catch (error) {
+    console.error("Error in reviewforproduct:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to add review",
+    });
+  }
+};
+
+// module.exports = { reviewforproduct };
+
+// !admin work now
+
+const getAdminAllProducts = async (req, res, next) => {
+  try {
+    const products = await Product.find();
+    res.status(200).json({
+      success: true,
+      products,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
 module.exports = {
   createProduct,
   getAllProducts,
   updateProduct,
   deleteProduct,
   getProductById,
+  reviewforproduct,
+  // admin
+  getAdminAllProducts,
 };
